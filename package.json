@@ -1,0 +1,23 @@
+{
+  "name": "drowsiguard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-Time Driver Fatigue Monitoring Platform with 60FPS Edge AI & Fleet Radar",
+  "scripts": {
+    "dev": "npm run dev --prefix apps/web",
+    "build": "npm run build --prefix apps/web",
+    "start": "npm run start --prefix apps/web",
+    "lint": "npm run lint --prefix apps/web"
+  },
+  "keywords": [
+    "drowsiness-detection",
+    "computer-vision",
+    "mediapipe",
+    "onnx",
+    "nextjs",
+    "fastapi",
+    "edge-ai"
+  ],
+  "author": "RoshanYd",
+  "license": "MIT"
+}
