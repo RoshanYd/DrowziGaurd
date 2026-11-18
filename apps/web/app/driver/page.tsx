@@ -28,6 +28,7 @@ import WebcamMonitor from "@/components/WebcamMonitor";
 import AlertOverlay from "@/components/AlertOverlay";
 import { startShiftAction, stopShiftAction } from "./actions";
 import { FatigueEventType, Shift } from "@/types/database";
+import { playAlertChime, speakAlertVoice } from "@/lib/speech";
 
 export default function DriverCabinPage() {
   const [vehiclePlate, setVehiclePlate] = useState("DL-01-AX-9942");
@@ -151,7 +152,7 @@ export default function DriverCabinPage() {
     }
   };
 
-  // Preview / Test Alarm Sound Beep
+  // Preview / Test Alarm Sound Beep & Trained Female Warning Voice
   const testAlarmBeep = () => {
     if (!soundEnabled || alertVolume <= 0) return;
     try {
@@ -159,24 +160,13 @@ export default function DriverCabinPage() {
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext })
           .webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      osc.frequency.setValueAtTime(1200, ctx.currentTime + 0.08);
-
-      const targetGain = Math.max(0.01, alertVolume * 0.35);
-      gain.gain.setValueAtTime(targetGain, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.2);
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        playAlertChime(ctx, alertVolume);
+      }
+      setTimeout(() => {
+        speakAlertVoice("Warning! Be alert!", alertVolume);
+      }, 150);
     } catch (e) {
       console.warn("Audio test failed:", e);
     }
@@ -313,12 +303,12 @@ export default function DriverCabinPage() {
                   ))}
                 </div>
 
-                {/* Test Beep Button */}
+                {/* Test Voice & Siren Button */}
                 <button
                   onClick={testAlarmBeep}
                   className="w-full py-1.5 rounded-xl border border-blue-500/40 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
                 >
-                  <BellRing className="w-3.5 h-3.5" /> Test Alarm Volume
+                  <BellRing className="w-3.5 h-3.5" /> Test Voice &amp; Siren
                 </button>
               </div>
             )}
@@ -447,7 +437,7 @@ export default function DriverCabinPage() {
                 onClick={testAlarmBeep}
                 className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-slate-200 shrink-0 transition"
               >
-                Test Sound
+                Test Voice
               </button>
             </div>
           </div>

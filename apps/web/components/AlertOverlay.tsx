@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { AlertTriangle, BellOff, Volume2, VolumeX, Volume1 } from "lucide-react";
 import { FatigueEventType } from "@/types/database";
+import { playAlertChime, speakAlertVoice, stopAlertVoice } from "@/lib/speech";
 
 interface AlertOverlayProps {
   isAlerting: boolean;
@@ -28,6 +29,16 @@ export default function AlertOverlay({
   const audioCtxRef = useRef<AudioContext | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Pre-warm SpeechSynthesis voices
+  useEffect(() => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
+
   // Initialize Web Audio API
   const initAudio = useCallback(() => {
     if (!audioCtxRef.current && typeof window !== "undefined") {
@@ -44,53 +55,40 @@ export default function AlertOverlay({
     }
   }, []);
 
-  // Play alarm sound (rapid dual-tone piercing beep scaled by volume)
-  const playBeep = useCallback(() => {
-    if (!soundEnabled || volume <= 0) return;
-    try {
-      initAudio();
-      const ctx = audioCtxRef.current;
-      if (!ctx) return;
-
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
-      osc.frequency.setValueAtTime(1200, ctx.currentTime + 0.1); // High pitch burst
-
-      // Apply adjustable volume scale (0.01 to 0.4 max safe gain)
-      const targetGain = Math.max(0.001, volume * 0.4);
-      gain.gain.setValueAtTime(targetGain, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.25);
-    } catch {
-      // Audio autoplay policy catch
-    }
-  }, [soundEnabled, volume, initAudio]);
-
+  // Synchronized Alert Loop: Dual-Tone Warning Chime + Trained Female Voice
   useEffect(() => {
-    if (isAlerting && soundEnabled && volume > 0) {
-      playBeep();
-      intervalRef.current = setInterval(playBeep, 400);
-    } else {
+    if (!isAlerting || !soundEnabled || volume <= 0) {
+      stopAlertVoice();
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+      return;
     }
 
+    initAudio();
+
+    const triggerCycle = () => {
+      if (audioCtxRef.current) {
+        playAlertChime(audioCtxRef.current, volume);
+      }
+      // Speak "Warning! Be alert!" with trained female voice offset right after the chime
+      setTimeout(() => {
+        speakAlertVoice("Warning! Be alert!", volume);
+      }, 150);
+    };
+
+    triggerCycle();
+    intervalRef.current = setInterval(triggerCycle, 1800);
+
     return () => {
+      stopAlertVoice();
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
-  }, [isAlerting, soundEnabled, volume, playBeep]);
+  }, [isAlerting, soundEnabled, volume, initAudio]);
 
   if (!isAlerting) return null;
 
@@ -187,11 +185,11 @@ export default function AlertOverlay({
             >
               {soundEnabled ? (
                 <>
-                  <VolumeX className="w-4 h-4 text-amber-400" /> Mute Siren
+                  <VolumeX className="w-4 h-4 text-amber-400" /> Mute Voice &amp; Siren
                 </>
               ) : (
                 <>
-                  <Volume2 className="w-4 h-4 text-emerald-400" /> Unmute Siren
+                  <Volume2 className="w-4 h-4 text-emerald-400" /> Unmute Voice &amp; Siren
                 </>
               )}
             </button>
