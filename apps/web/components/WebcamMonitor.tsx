@@ -123,7 +123,10 @@ export default function WebcamMonitor({
   const BUFFER_MAX = 300; // 5s at 60fps
   const SEQ_LEN = 30; // LSTM sequence length
 
-  // Timing thresholds for differentiating blink vs microsleep vs sleep
+  // Timing & wall-clock ms trackers for sub-millisecond precision
+  const eyeClosedStartTimeRef = useRef(0);
+  const yawnStartTimeRef = useRef(0);
+  const noFaceStartTimeRef = useRef(0);
   const closedFramesRef = useRef(0);
   const openFramesRef = useRef(0);
   const yawnFramesRef = useRef(0);
@@ -482,53 +485,72 @@ export default function WebcamMonitor({
             drowsyProbabilityRef.current = Number(currentProb.toFixed(3));
           }
 
-          // ── CLINICAL DIFFERENTIATION: BLINK vs DROWSY vs MICROSLEEP ──
-          const isEyeClosed = currentEar < 0.20;
-          const isYawning = currentMar > 0.65;
+          // ── PRECISE WALL-CLOCK TEMPORAL DIFFERENTIATION (2.0s MICROSLEEP) ──
+          const EAR_CLOSED_THRESHOLD = 0.22; // Responsive closure threshold (captures hooded & half-closed eyes)
+          const MAR_YAWN_THRESHOLD = 0.65;
+          const isEyeClosed = currentEar < EAR_CLOSED_THRESHOLD;
+          const isYawning = currentMar > MAR_YAWN_THRESHOLD;
+          const nowPerfMs = performance.now();
 
           let calculatedState: DriverState = "ALERT";
+          let currentClosedSecs = 0.0;
 
           if (!faceFound) {
-            noFaceFramesRef.current++;
-            if (noFaceFramesRef.current > 150) {
+            if (noFaceStartTimeRef.current === 0) {
+              noFaceStartTimeRef.current = nowPerfMs;
+            }
+            const noFaceDuration = (nowPerfMs - noFaceStartTimeRef.current) / 1000.0;
+            if (noFaceDuration > 2.0) {
               calculatedState = "DISTRACTED";
             } else {
               calculatedState = "NO_FACE";
             }
-            closedFramesRef.current = 0;
-            yawnFramesRef.current = 0;
+            eyeClosedStartTimeRef.current = 0;
+            yawnStartTimeRef.current = 0;
           } else {
-            noFaceFramesRef.current = 0;
+            noFaceStartTimeRef.current = 0;
 
             if (isEyeClosed) {
-              closedFramesRef.current++;
-              openFramesRef.current = 0;
+              if (eyeClosedStartTimeRef.current === 0) {
+                eyeClosedStartTimeRef.current = nowPerfMs;
+              }
+              const closedMs = nowPerfMs - eyeClosedStartTimeRef.current;
+              currentClosedSecs = Number((closedMs / 1000.0).toFixed(1));
 
-              if (closedFramesRef.current <= 20) {
+              // Fast, accurate thresholds based on exact wall-clock milliseconds:
+              if (closedMs <= 350) {
+                // 0 to 350ms: normal natural blink in progress
                 calculatedState = "BLINKING";
-              } else if (closedFramesRef.current <= 110) {
+              } else if (closedMs < 2000) {
+                // 350ms to 2000ms: early drowsiness precursor warning
                 calculatedState = "DROWSY_PRECURSOR";
               } else {
+                // 2000ms+ (2.0s to 3.0s): MICROSLEEP ALARM!
                 calculatedState = "MICROSLEEP";
               }
             } else {
-              if (closedFramesRef.current > 0) {
-                if (closedFramesRef.current >= 6 && closedFramesRef.current <= 24) {
+              if (eyeClosedStartTimeRef.current > 0) {
+                const totalClosedMs = nowPerfMs - eyeClosedStartTimeRef.current;
+                // If closure was 80ms - 450ms, count as a healthy natural blink
+                if (totalClosedMs >= 80 && totalClosedMs <= 450) {
                   blinkCountRef.current += 1;
                 }
               }
-              closedFramesRef.current = 0;
-              openFramesRef.current++;
+              eyeClosedStartTimeRef.current = 0;
+              currentClosedSecs = 0.0;
 
               if (isYawning) {
-                yawnFramesRef.current++;
-                if (yawnFramesRef.current > 120) {
+                if (yawnStartTimeRef.current === 0) {
+                  yawnStartTimeRef.current = nowPerfMs;
+                }
+                const yawnDuration = (nowPerfMs - yawnStartTimeRef.current) / 1000.0;
+                if (yawnDuration >= 2.0) {
                   calculatedState = "YAWNING";
                 } else {
                   calculatedState = "ALERT";
                 }
               } else {
-                yawnFramesRef.current = Math.max(0, yawnFramesRef.current - 2);
+                yawnStartTimeRef.current = 0;
                 calculatedState = "ALERT";
               }
             }
@@ -536,7 +558,7 @@ export default function WebcamMonitor({
 
           // ── ALARM TRIGGERING RULES ──
           const now = Date.now();
-          const cooldownElapsed = now - lastAlertTimeRef.current > 5000;
+          const cooldownElapsed = now - lastAlertTimeRef.current > 2500;
 
           if (calculatedState === "MICROSLEEP" && cooldownElapsed) {
             lastAlertTimeRef.current = now;
@@ -555,7 +577,6 @@ export default function WebcamMonitor({
           }
 
           // Draw Canvas Overlay at full 60 FPS
-          const closedSecs = closedFramesRef.current / 60.0;
           drawResponsiveHud(
             ctx,
             width,
@@ -565,7 +586,7 @@ export default function WebcamMonitor({
             currentMar,
             currentPerclos,
             calculatedState,
-            closedSecs
+            currentClosedSecs
           );
 
           // FPS counter
@@ -586,7 +607,7 @@ export default function WebcamMonitor({
             setPerclosValue(currentPerclos);
             setDrowsyProbability(currentProb);
             setDriverState(calculatedState);
-            setClosedSeconds(Number(closedSecs.toFixed(1)));
+            setClosedSeconds(currentClosedSecs);
             setBlinkCount(blinkCountRef.current);
 
             if (onTelemetryUpdateRef.current) {
