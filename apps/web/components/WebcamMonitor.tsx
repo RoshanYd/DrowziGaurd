@@ -103,6 +103,19 @@ export default function WebcamMonitor({
   const [closedSeconds, setClosedSeconds] = useState(0.0);
   const [blinkCount, setBlinkCount] = useState(0);
 
+  // Stable refs for callbacks and loop state to eliminate React render thrashing
+  const onAlertRef = useRef(onAlert);
+  onAlertRef.current = onAlert;
+  const onClearAlertRef = useRef(onClearAlert);
+  onClearAlertRef.current = onClearAlert;
+  const onTelemetryUpdateRef = useRef(onTelemetryUpdate);
+  onTelemetryUpdateRef.current = onTelemetryUpdate;
+  const shiftIdRef = useRef(shiftId);
+  shiftIdRef.current = shiftId;
+  const blinkCountRef = useRef(0);
+  const drowsyProbabilityRef = useRef(0.05);
+  const fpsRef = useRef(60);
+
   // Internal refs
   const faceLandmarkerRef = useRef<any>(null);
   const ortSessionRef = useRef<ort.InferenceSession | null>(null);
@@ -250,7 +263,7 @@ export default function WebcamMonitor({
       }
       setHasCamera(false);
       setDriverState("PAUSED");
-      onClearAlert();
+      onClearAlertRef.current();
       return;
     }
 
@@ -297,7 +310,7 @@ export default function WebcamMonitor({
         streamRef.current = null;
       }
     };
-  }, [facingMode, isCameraActive, onClearAlert]);
+  }, [facingMode, isCameraActive]);
 
   // Euclidean distance helper
   const dist = (p1: { x: number; y: number }, p2: { x: number; y: number }) => {
@@ -463,15 +476,11 @@ export default function WebcamMonitor({
 
           // Run LSTM model periodically (every 6 frames)
           frameCountRef.current++;
-          let currentProb = drowsyProbability;
+          let currentProb = drowsyProbabilityRef.current;
           if (frameCountRef.current % 6 === 0) {
             currentProb = await runLstmInference(buf);
-            setDrowsyProbability(Number(currentProb.toFixed(3)));
+            drowsyProbabilityRef.current = Number(currentProb.toFixed(3));
           }
-
-          setEarValue(currentEar);
-          setMarValue(currentMar);
-          setPerclosValue(currentPerclos);
 
           // ── CLINICAL DIFFERENTIATION: BLINK vs DROWSY vs MICROSLEEP ──
           const isEyeClosed = currentEar < 0.20;
@@ -494,8 +503,6 @@ export default function WebcamMonitor({
             if (isEyeClosed) {
               closedFramesRef.current++;
               openFramesRef.current = 0;
-              const closedSec = closedFramesRef.current / 60.0;
-              setClosedSeconds(Number(closedSec.toFixed(1)));
 
               if (closedFramesRef.current <= 20) {
                 calculatedState = "BLINKING";
@@ -507,11 +514,10 @@ export default function WebcamMonitor({
             } else {
               if (closedFramesRef.current > 0) {
                 if (closedFramesRef.current >= 6 && closedFramesRef.current <= 24) {
-                  setBlinkCount((prev) => prev + 1);
+                  blinkCountRef.current += 1;
                 }
               }
               closedFramesRef.current = 0;
-              setClosedSeconds(0.0);
               openFramesRef.current++;
 
               if (isYawning) {
@@ -528,29 +534,28 @@ export default function WebcamMonitor({
             }
           }
 
-          setDriverState(calculatedState);
-
           // ── ALARM TRIGGERING RULES ──
           const now = Date.now();
           const cooldownElapsed = now - lastAlertTimeRef.current > 5000;
 
           if (calculatedState === "MICROSLEEP" && cooldownElapsed) {
             lastAlertTimeRef.current = now;
-            onAlert("microsleep", currentPerclos);
+            onAlertRef.current("microsleep", currentPerclos);
             dispatchTelemetry("microsleep", currentPerclos);
           } else if (calculatedState === "YAWNING" && cooldownElapsed) {
             lastAlertTimeRef.current = now;
-            onAlert("yawn", currentPerclos);
+            onAlertRef.current("yawn", currentPerclos);
             dispatchTelemetry("yawn", currentPerclos);
           } else if (calculatedState === "DISTRACTED" && cooldownElapsed) {
             lastAlertTimeRef.current = now;
-            onAlert("distraction", currentPerclos);
+            onAlertRef.current("distraction", currentPerclos);
             dispatchTelemetry("distraction", currentPerclos);
           } else if (calculatedState === "ALERT" || calculatedState === "BLINKING") {
-            onClearAlert();
+            onClearAlertRef.current();
           }
 
-          // Draw Canvas Overlay
+          // Draw Canvas Overlay at full 60 FPS
+          const closedSecs = closedFramesRef.current / 60.0;
           drawResponsiveHud(
             ctx,
             width,
@@ -560,28 +565,41 @@ export default function WebcamMonitor({
             currentMar,
             currentPerclos,
             calculatedState,
-            closedFramesRef.current / 60.0
+            closedSecs
           );
 
           // FPS counter
           const nowPerf = performance.now();
           const delta = nowPerf - lastFrameTimeRef.current;
           if (delta >= 1000) {
-            setFps(Math.round((frameCountRef.current * 1000) / delta));
+            const measuredFps = Math.round((frameCountRef.current * 1000) / delta);
+            fpsRef.current = measuredFps;
+            setFps(measuredFps);
             frameCountRef.current = 0;
             lastFrameTimeRef.current = nowPerf;
           }
 
-          if (onTelemetryUpdate) {
-            onTelemetryUpdate({
-              ear: currentEar,
-              mar: currentMar,
-              perclos: currentPerclos,
-              fps,
-              drowsyProb: currentProb,
-              blinkCount,
-              stateLabel: calculatedState,
-            });
+          // Throttle React state updates to every 6 frames (~10Hz) to prevent render thrashing
+          if (frameCountRef.current % 6 === 0) {
+            setEarValue(currentEar);
+            setMarValue(currentMar);
+            setPerclosValue(currentPerclos);
+            setDrowsyProbability(currentProb);
+            setDriverState(calculatedState);
+            setClosedSeconds(Number(closedSecs.toFixed(1)));
+            setBlinkCount(blinkCountRef.current);
+
+            if (onTelemetryUpdateRef.current) {
+              onTelemetryUpdateRef.current({
+                ear: currentEar,
+                mar: currentMar,
+                perclos: currentPerclos,
+                fps: fpsRef.current,
+                drowsyProb: currentProb,
+                blinkCount: blinkCountRef.current,
+                stateLabel: calculatedState,
+              });
+            }
           }
         }
       }
@@ -597,13 +615,13 @@ export default function WebcamMonitor({
         cancelAnimationFrame(animFrameIdRef.current);
       }
     };
-  }, [hasCamera, isCameraActive, adaptiveComputerVision, runLstmInference, onAlert, onClearAlert, onTelemetryUpdate, fps, drowsyProbability, blinkCount]);
+  }, [hasCamera, isCameraActive, adaptiveComputerVision, runLstmInference]);
 
   // Dispatch Telemetry Action
   const dispatchTelemetry = async (eventType: FatigueEventType, perclosScore: number) => {
     try {
       const payload: DriverTelemetryPayload = {
-        shift_id: shiftId,
+        shift_id: shiftIdRef.current,
         event_type: eventType,
         perclos_score: perclosScore,
         location_lat: 28.6139 + (Math.random() - 0.5) * 0.05,

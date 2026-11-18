@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import {
   Shield,
@@ -110,7 +110,7 @@ export default function DriverCabinPage() {
     }
   };
 
-  const handleAlertTriggered = (eventType: FatigueEventType, perclosScore: number) => {
+  const handleAlertTriggered = useCallback((eventType: FatigueEventType, perclosScore: number) => {
     setIsAlerting(true);
     setCurrentAlertEventType(eventType);
     setCurrentPerclos(perclosScore);
@@ -123,12 +123,24 @@ export default function DriverCabinPage() {
       },
       ...prev.slice(0, 19),
     ]);
-  };
+  }, []);
 
-  const handleClearAlert = () => {
+  const handleClearAlert = useCallback(() => {
     setIsAlerting(false);
     setCurrentAlertEventType(null);
-  };
+  }, []);
+
+  const handleTelemetryUpdate = useCallback((metrics: {
+    ear: number;
+    mar: number;
+    perclos: number;
+    fps: number;
+    drowsyProb: number;
+    blinkCount: number;
+    stateLabel: string;
+  }) => {
+    setTelemetry(metrics);
+  }, []);
 
   // Mobile Fullscreen Toggle
   const toggleFullScreen = () => {
@@ -334,7 +346,7 @@ export default function DriverCabinPage() {
               onToggleCameraActive={(active) => setIsCameraActive(active)}
               onAlert={handleAlertTriggered}
               onClearAlert={handleClearAlert}
-              onTelemetryUpdate={(metrics) => setTelemetry(metrics)}
+              onTelemetryUpdate={handleTelemetryUpdate}
             />
           </div>
 
