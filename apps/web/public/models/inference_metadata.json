@@ -1,0 +1,28 @@
+{
+  "model_file": "drowsiness_lstm.onnx",
+  "input_name": "input",
+  "output_name": "output",
+  "input_shape": [
+    1,
+    30,
+    2
+  ],
+  "features": [
+    "ear_avg",
+    "mar"
+  ],
+  "feature_mean": [
+    0.2505837678909302,
+    0.31686192750930786
+  ],
+  "feature_std": [
+    0.06341302394866943,
+    0.2617203891277313
+  ],
+  "seq_len": 30,
+  "threshold": 0.5,
+  "labels": {
+    "0": "alert",
+    "1": "drowsy"
+  }
+}

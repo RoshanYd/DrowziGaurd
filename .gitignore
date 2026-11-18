@@ -1,0 +1,54 @@
+# Node.js / Next.js
+node_modules/
+.next/
+.turbo/
+out/
+dist/
+build/
+
+# Environment Variables (sensitive keys)
+.env
+.env.local
+.env.*.local
+!.env.local.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# ML Model Weights (large binary files)
+ml-pipeline/models/*.pth
+ml-pipeline/models/*.onnx
+ml-pipeline/data/*.csv
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Coverage
+coverage/
+.nyc_output
+
+# TypeScript cache
+*.tsbuildinfo
